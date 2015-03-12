@@ -1,0 +1,5 @@
+Makefile.local
+*.o
+*.so
+*.pyc
+*.pyo

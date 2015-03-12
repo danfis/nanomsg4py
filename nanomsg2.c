@@ -119,15 +119,17 @@ static PyObject *sockRecv(sock_t *self, PyObject *args)
     int flags = 0;
     void *buf;
     int buflen;
-    PyObject *obuf;
+    PyObject *bbuf, *sbuf;
 
     if (!PyArg_ParseTuple(args, "|i", &flags))
         return NULL;
     buflen = nn_recv(self->sock, &buf, NN_MSG, flags);
     if (buflen >= 0){
-        obuf = PyBuffer_FromMemory(buf, buflen);
+        sbuf = PyString_FromStringAndSize(buf, buflen);
+        bbuf = PyBuffer_FromObject(sbuf, 0, Py_END_OF_BUFFER);
+        Py_DECREF(sbuf);
         nn_freemsg(buf);
-        return obuf;
+        return bbuf;
     }else{
         ERR;
         return NULL;

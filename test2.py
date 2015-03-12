@@ -3,6 +3,20 @@
 import nanomsg2
 
 print(dir(nanomsg2))
-sock = nanomsg2.Socket(nanomsg2.AF_SP, nanomsg2.NN_PULL)
-print sock
-print dir(sock)
+recv = nanomsg2.Socket(nanomsg2.AF_SP, nanomsg2.NN_PULL)
+recv.bind('inproc://recv')
+
+send = nanomsg2.Socket(nanomsg2.AF_SP, nanomsg2.NN_PUSH)
+send.connect('inproc://recv')
+
+send.send(b'adf')
+send.send(b'')
+print(recv.recv())
+print(recv.recv())
+
+send.shutdown()
+send.close()
+
+recv.shutdown()
+recv.close()
+

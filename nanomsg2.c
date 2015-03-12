@@ -7,9 +7,12 @@
 #include <nanomsg/pipeline.h>
 #include <nanomsg/bus.h>
 
+#define ERR PyErr_SetString(PyExc_RuntimeError, nn_strerror(errno))
+
 typedef struct {
     PyObject_HEAD
     int sock;
+    int endpoint;
 } sock_t;
 
 static void sockDealloc(sock_t *sock)
@@ -21,6 +24,7 @@ static PyObject *sockNew(PyTypeObject *type, PyObject *args, PyObject *kwds)
     sock_t *self;
     self = (sock_t *)type->tp_alloc(type, 0);
     self->sock = -1;
+    self->endpoint = -1;
     return (PyObject *)self;
 }
 
@@ -32,18 +36,148 @@ static int sockInit(sock_t *self, PyObject *args, PyObject *kwds)
         return -1;
     self->sock = nn_socket(domain, protocol);
     if (self->sock == -1){
-        PyErr_SetString(PyExc_RuntimeError, nn_strerror(errno));
+        ERR;
         return -1;
     }
     return 0;
 }
 
+static PyObject *sockBind(sock_t *self, PyObject *address)
+{
+    const char *addr;
+
+    addr = PyString_AS_STRING(address);
+    if (addr == NULL)
+        return NULL;
+
+    self->endpoint = nn_bind(self->sock, addr);
+    if (self->endpoint == -1){
+        ERR;
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *sockShutdown(sock_t *self)
+{
+    if (self->sock == -1 || self->endpoint == -1)
+        return NULL;
+    if (nn_shutdown(self->sock, self->endpoint) != 0){
+        ERR;
+        return NULL;
+    }
+    self->endpoint = -1;
+    Py_RETURN_NONE;
+}
+
+static PyObject *sockClose(sock_t *self)
+{
+    if (self->sock == -1)
+        return NULL;
+    if (nn_close(self->sock) != 0){
+        ERR;
+        return NULL;
+    }
+    self->sock = self->endpoint = -1;
+    Py_RETURN_NONE;
+}
+
+static PyObject *sockConnect(sock_t *self, PyObject *address)
+{
+    const char *addr;
+
+    addr = PyString_AS_STRING(address);
+    if (addr == NULL)
+        return NULL;
+
+    self->endpoint = nn_connect(self->sock, addr);
+    if (self->endpoint == -1){
+        ERR;
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *sockSend(sock_t *self, PyObject *args)
+{
+    int flags = 0;
+    char *buf;
+    int buflen;
+
+    if (!PyArg_ParseTuple(args, "t#|i", &buf, &buflen, &flags))
+        return NULL;
+
+    if (nn_send(self->sock, buf, buflen, flags) == -1){
+        ERR;
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *sockRecv(sock_t *self, PyObject *args)
+{
+    int flags = 0;
+    void *buf;
+    int buflen;
+    PyObject *obuf;
+
+    if (!PyArg_ParseTuple(args, "|i", &flags))
+        return NULL;
+    buflen = nn_recv(self->sock, &buf, NN_MSG, flags);
+    if (buflen >= 0){
+        obuf = PyBuffer_FromMemory(buf, buflen);
+        nn_freemsg(buf);
+        return obuf;
+    }else{
+        ERR;
+        return NULL;
+    }
+}
+
+static PyObject *sockSetInt(sock_t *self, PyObject *args, int option)
+{
+    int timeout = -1;
+    int ret;
+
+    if (!PyArg_ParseTuple(args, "i", &timeout))
+        return NULL;
+    ret = nn_setsockopt(self->sock, NN_SOL_SOCKET, option,
+                        (const void *)&timeout, sizeof(int));
+    if (ret == -1){
+        ERR;
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *sockSetRecvTimeout(sock_t *self, PyObject *args)
+{
+    return sockSetInt(self, args, NN_RCVTIMEO);
+}
+
+static PyObject *sockSetSendTimeout(sock_t *self, PyObject *args)
+{
+    return sockSetInt(self, args, NN_SNDTIMEO);
+}
+
+static PyObject *sockSetLinger(sock_t *self, PyObject *args)
+{
+    return sockSetInt(self, args, NN_LINGER);
+}
+
 static PyMethodDef sock_methods[] = {
-    /*
-    {"name", (PyCFunction)Noddy_name, METH_NOARGS,
-     "Return the name, combining the first and last name"
-    },
-    */
+    {"bind", (PyCFunction)sockBind, METH_O, "nn_bind(3)" },
+    {"shutdown", (PyCFunction)sockShutdown, METH_NOARGS, "nn_shutdown(3)" },
+    {"close", (PyCFunction)sockClose, METH_NOARGS, "nn_close(3)" },
+    {"connect", (PyCFunction)sockConnect, METH_O, "nn_connect(3)" },
+    {"send", (PyCFunction)sockSend, METH_VARARGS, "nn_send(3)" },
+    {"recv", (PyCFunction)sockRecv, METH_VARARGS, "nn_recv(3)" },
+    {"setRecvTimeout", (PyCFunction)sockSetRecvTimeout, METH_VARARGS,
+        "nn_setsockopt(3) -- NN_RCVTIMEO" },
+    {"setSendTimeout", (PyCFunction)sockSetSendTimeout, METH_VARARGS,
+        "nn_setsockopt(3) -- NN_SNDTIMEO" },
+    {"setLinger", (PyCFunction)sockSetLinger, METH_VARARGS,
+        "nn_setsockopt(3) -- NN_LINGER" },
     {NULL}  /* Sentinel */
 };
 
@@ -122,6 +256,7 @@ initnanomsg2(void)
     CONST(m, NN_PUSH);
     CONST(m, NN_PULL);
     CONST(m, NN_BUS);
+    CONST(m, NN_DONTWAIT);
 
 
     Py_INCREF(&SocketType);

@@ -9,10 +9,8 @@ LDFLAGS += $(PYTHON_LDFLAGS)
 LDFLAGS += $(NANOMSG_LDFLAGS)
 
 
-TARGETS  = py2
-
-all:
-	echo "Specify target py2 or py3"
+all: py2
+#echo "Specify target py2 or py3"
 
 py2: nanomsg2module.so
 
